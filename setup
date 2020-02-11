@@ -1,0 +1,268 @@
+#!/usr/bin/env bash
+#
+# ふわふわインストーラー
+# Extremely fuwa fuwa installer
+#
+
+msg() {
+	dialog --stdout \
+		--backtitle "Fuwa Fuwa installer" "$@"
+}
+
+format_drives() {
+	local parts selection mypart MKFS
+	local partarr=()
+
+	parts=$(lsblk -r $1 | grep part | cut -d" " -f1 | nl)
+	while read i name size; do
+		partarr+=($i "/dev/$name")
+	done <<< "$parts"
+
+	selection=$(msg --title "Format partitions" \
+			--menu "Select your partition to format" 16 60 8 \
+			"${partarr[@]}")
+
+	STATUS=$?
+	if [ $STATUS -ne 0 ]; then
+		partition_drives
+	fi
+
+	selection=$(lsblk -r $1 | grep part | cut -d" " -f1)
+	mypart="/dev/$selection"
+
+	selection=$(msg --title "Format partitions" \
+			--menu "Select filesystem to use" 16 60 8 \
+			1 "BTRFS (Recommended)" \
+			2 "ext2" \
+			3 "ext3" \
+			4 "ext4" \
+			5 "vfat")
+
+	STATUS=$?
+	if [ $STATUS -ne 0 ]; then
+		format_drives
+	fi
+
+	case "$selection" in
+		1) MKFS="mkfs.btrfs -f $mypart" 2>&1;;
+		2) MKFS="mke2fs -F $mypart" 2>&1;;
+		3) MKFS="mke2fs -F -j $mypart" 2>&1;;
+		4) MKFS="mke2fs -F -t ext4 $mypart" 2>&1;;
+		5) MKFS="mkfs.vfat -F32 $mypart" 2>&1;;
+	esac
+
+	msg --title "Formatting partition: $mypart" \
+		--infobox "Formatting partition: $mypart
+Using command: $MKFS" 5 46; sleep 1; $MKFS
+
+	format_drives
+}
+
+partition_drives() {
+	local selection disks i name size mydisk
+	local diskarr=()
+	local exot="no"
+
+	disks=$(lsblk -r | grep disk | cut -d" " -f1,4 | nl)
+	while read i name size; do
+		diskarr+=($i "/dev/$name ($size)")
+	done <<< "$disks"
+
+	selection=$(msg --title "Partition disks" \
+			--menu "Select your disk" 16 60 8 \
+			"${diskarr[@]}")
+
+	STATUS=$?
+	if [ $STATUS -ne 0 ]; then
+		main
+	fi
+
+	selection=$(lsblk -r | grep disk | cut -d" " -f1 | sed -n "${selection}p")
+	mydisk="/dev/$selection"
+
+	selection=$(msg --title "Partition disks" \
+			--menu "Select tool to partition your disks" 16 60 8 \
+			1 "cfdisk" \
+			2 "cgdisk" \
+			3 "fdisk" \
+			4 "gdisk")
+
+	STATUS=$?
+	if [ $STATUS -ne 0 ]; then
+		main
+	fi
+
+	case $selection in
+		1) cfdisk -z $mydisk ;;
+		2) cgdisk $mydisk ;;
+		3) fdisk $mydisk ;;
+		4) gdisk $mydisk ;;
+	esac
+
+	format_drives $mydisk
+}
+
+setup_mountpoints() {
+	local parts selection mypoint
+	local partarr=()
+
+	parts=$(lsblk -r | grep part | cut -d" " -f1 | nl)
+	while read i name size; do
+		partarr+=($i "/dev/$name")
+	done <<< "$parts"
+
+	selection=$(msg --title "Setup mountpoints" \
+			--menu "Select your partition" 16 60 8 \
+			"${partarr[@]}")
+
+	STATUS=$?
+	if [ $STATUS -ne 0 ]; then
+		main
+	fi
+
+	selection=$(lsblk -r | grep part | cut -d" " -f1 | sed -n "${selection}p")
+	mypart="/dev/$selection"
+
+	mypoint=$(msg --title "Enter mountpoint name" \
+			--inputbox "Enter mountpoint name for $mypart" 8 55)
+
+	if [ -z "$mypoint" ]; then
+		msg --title "Specify mountpoint" \
+			--infobox "You didn't specify mountpoint for $mypart!" 8 55
+		setup_mountpoints
+	fi
+
+	case $mypoint in
+		"/")
+			if mountpoint -q /mnt; then
+				umount -l /mnt
+			fi
+			mount $mypart /mnt
+			;;
+		*)
+
+			if ! mountpoint -q /mnt; then
+				msg --title "Mountpoint error" \
+					--infobox "You don't have / mounted!" 4 55
+					sleep 3
+				setup_mountpoints
+			fi
+			if mountpoint -q /mnt/${mypoint}; then
+				umount -l /mnt/${mypoint}
+			fi
+			if [ ! -d "/mnt/${mypoint}" ]; then
+				mkdir -p /mnt/${mypoint}
+			fi
+			mount $mypart /mnt/${mypoint}
+			;;
+	esac
+
+	setup_mountpoints
+}
+
+install_base() {
+	local sets mysets i
+	local setsarr=()
+
+	msg --title "Searching for media" \
+		--infobox "Searching for Ataraxia Linux installation media" 4 55
+	sleep 1
+
+	mount -n -t iso9660 LABEL=ataraxialinux /media/cdrom
+	if [ $? -ne 0 ]; then
+		msg --title "Search error" \
+			--infobox "Failed to find Ataraxia Linux installation media" 4 55
+		sleep 3
+		main
+	fi
+
+	if [ ! -d "/media/cdrom/sets" ]; then
+		msg --title "Search error" \
+			--infobox "Failed to find Ataraxia Linux components list" 4 55
+		sleep 3
+		main
+	fi
+
+	if mountpoint -q /mnt; then
+		msg --title "Mountpoint error" \
+			--infobox "You don't have / mounted!" 4 55
+		sleep 3
+		main
+	fi
+
+	sets=$(ls /mnt/cdrom/sets | grep -h "[a-z]*.tar.zst" | sed 's/.tar.zst//' | sort | uniq)
+	while read i name; do
+		setsarr+=($i "$name" on)
+	done <<< "$sets"
+
+	mysets=$(msg --title "Install components" \
+			--checklist "Choose system components to install:" 16 60 8 \
+			"${setsarr[@]}")
+
+	for i in $mysets; do
+		(pv -n /mnt/cdrom/sets/$i.tar.zst | bsdtar -C /mnt xf - ) \
+			2>&1 | msg --gauge "Installing component: $i" 6 50
+	done
+
+	msg --title "System configuration" \
+		--infobox "Configuring system..." 4 55
+	sleep 1
+
+	genfstab -U /mnt >> /mnt/etc/fstab
+
+	for i in proc sys dev; do
+		mount --bind /$i /mnt/$i
+	done
+
+	chroot /mnt /usr/bin/env -i \
+		HOME=/root TERM="$TERM" \
+		PATH=/usr/bin \
+		/usr/bin/bash --login << EOF
+# Update the udev hardware database
+udevadm hwdb --update
+EOF
+
+	for i in proc sys dev; do
+		umount -l /mnt/$i
+	done
+
+	msg --title "Success!" \
+		--infobox "Ataraxia Linux was successfuly installed! Enjoy!" 4 55
+	sleep 1
+
+	main
+}
+
+main() {
+	local selection
+
+	selection=$(msg --title "Main menu" \
+			--menu "Welcome to the Ataraxia Linux setup!
+Complete the following installation steps one by one." 16 60 8 \
+			1 "Partition and format disk drives" \
+			2 "Setup mountpoints for partitions" \
+			3 "Install the base system" \
+			4 "Install bootloader" \
+			5 "Set root password and create users" \
+			6 "Configure the system" \
+			7 "Reboot")
+
+	STATUS=$?
+	if [ $STATUS -ne 0 ]; then
+		exit
+	fi
+
+	case $selection in
+		1) partition_drives ;;
+		2) setup_mountpoints ;;
+		3) install_base ;;
+		4) install_bootloader ;;
+		5) set_password_create_users ;;
+		6) configure_system ;;
+		7) reboot_system ;;
+	esac
+}
+
+main
+
+exit 0
