@@ -128,7 +128,7 @@ setup_mountpoints() {
 
 	if [ -z "$mypoint" ]; then
 		msg --title "Specify mountpoint" \
-			--infobox "You didn't specify mountpoint for $mypart!" 8 55
+			--infobox "You haven't specified mountpoint for $mypart!" 8 55
 		setup_mountpoints
 	fi
 
@@ -143,8 +143,7 @@ setup_mountpoints() {
 
 			if ! mountpoint -q /mnt; then
 				msg --title "Mountpoint error" \
-					--infobox "You don't have / mounted!" 4 55
-					sleep 3
+					--msgbox "You don't have / mounted!" 4 55
 				setup_mountpoints
 			fi
 			if mountpoint -q /mnt/${mypoint}; then
@@ -168,41 +167,27 @@ install_base() {
 		--infobox "Searching for Ataraxia Linux installation media" 4 55
 	sleep 1
 
-	mount -n -t iso9660 LABEL=ataraxialinux /media/cdrom
+	mount -n -r /dev/disk/by-label/ataraxialinux /newroot/cdrom
 	if [ $? -ne 0 ]; then
 		msg --title "Search error" \
-			--infobox "Failed to find Ataraxia Linux installation media" 4 55
-		sleep 3
+			--msgbox "Failed to find Ataraxia Linux installation media" 4 55
 		main
 	fi
 
-	if [ ! -d "/media/cdrom/sets" ]; then
+	if [ ! -f "/media/cdrom/seiba/seiba.sfs" ]; then
 		msg --title "Search error" \
-			--infobox "Failed to find Ataraxia Linux components list" 4 55
-		sleep 3
+			--msgbox "Cannot find Ataraxia Linux system on your media" 4 55
 		main
 	fi
 
 	if mountpoint -q /mnt; then
 		msg --title "Mountpoint error" \
-			--infobox "You don't have / mounted!" 4 55
-		sleep 3
+			--msgbox "You don't have / mounted!" 4 55
 		main
 	fi
 
-	sets=$(ls /mnt/cdrom/sets | grep -h "[a-z]*.tar.zst" | sed 's/.tar.zst//' | sort | uniq)
-	while read i name; do
-		setsarr+=($i "$name" on)
-	done <<< "$sets"
-
-	mysets=$(msg --title "Install components" \
-			--checklist "Choose system components to install:" 16 60 8 \
-			"${setsarr[@]}")
-
-	for i in $mysets; do
-		(pv -n /mnt/cdrom/sets/$i.tar.zst | bsdtar -C /mnt xf - ) \
-			2>&1 | msg --gauge "Installing component: $i" 6 50
-	done
+	(pv -n /media/cdrom/seiba/seiba.sfs | unsquashfs -d /mnt - ) \
+			2>&1 | msg --gauge "Copying files" 6 50
 
 	msg --title "System configuration" \
 		--infobox "Configuring system..." 4 55
@@ -222,13 +207,20 @@ install_base() {
 udevadm hwdb --update
 EOF
 
+	msg --title "System configuration" \
+		--infobox "Cleaning up..." 4 55
+	sleep 1
+	chroot /mnt /usr/bin/env -i \
+		HOME=/root TERM="$TERM" \
+		PATH=/usr/bin \
+		/usr/bin/userdel -r anon
+
 	for i in proc sys dev; do
 		umount -l /mnt/$i
 	done
 
 	msg --title "Success!" \
-		--infobox "Ataraxia Linux was successfuly installed! Enjoy!" 4 55
-	sleep 1
+		--msgbox "Ataraxia Linux was successfuly installed! Enjoy!" 4 55
 
 	main
 }
