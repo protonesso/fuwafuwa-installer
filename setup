@@ -190,8 +190,8 @@ install_base() {
 		main
 	fi
 
-	(pv -n /media/cdrom/seiba/seiba.sfs | unsquashfs -d /mnt - ) \
-			2>&1 | msg --gauge "Copying files" 6 50
+	(pv -n /media/cdrom/seiba/system.tar.zst | bsdtar -C /mnt xf - ) \
+			2>&1 | msg --gauge "Installing operating system" 6 50
 
 	msg --title "System configuration" \
 		--infobox "Configuring system..." 4 55
@@ -211,17 +211,11 @@ install_base() {
 udevadm hwdb --update
 EOF
 
-	msg --title "System configuration" \
-		--infobox "Cleaning up..." 4 55
-	sleep 1
-	chroot /mnt /usr/bin/env -i \
-		HOME=/root TERM="$TERM" \
-		PATH=/usr/bin \
-		/usr/bin/userdel -r anon
-
 	for i in proc sys dev; do
 		umount -l /mnt/$i
 	done
+
+	umount -a
 
 	msg --title "Success!" \
 		--msgbox "Ataraxia Linux was successfuly installed! Enjoy!" 4 55
