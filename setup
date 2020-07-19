@@ -167,12 +167,16 @@ install_base() {
 		--infobox "Searching for Ataraxia Linux installation media" 4 55
 	sleep 1
 
-	mount -n -r /dev/disk/by-label/ataraxialinux /newroot/cdrom
-	if [ $? -ne 0 ]; then
-		msg --title "Search error" \
-			--msgbox "Failed to find Ataraxia Linux installation media" 4 55
-		main
-	fi
+	mount -n -r -t iso9660 LABEL="ataraxialinux" /media/cdrom || \
+	{
+		sleep 3
+		mount -n -r /dev/disk/by-label/ataraxialinux /media/cdrom
+		if [ $? -ne 0 ]; then
+			msg --title "Search error" \
+				--msgbox "Failed to find Ataraxia Linux installation media" 4 55
+			main
+		fi
+	}
 
 	if [ ! -f "/media/cdrom/seiba/seiba.sfs" ]; then
 		msg --title "Search error" \
@@ -180,7 +184,7 @@ install_base() {
 		main
 	fi
 
-	if mountpoint -q /mnt; then
+	if ! mountpoint -q /mnt; then
 		msg --title "Mountpoint error" \
 			--msgbox "You don't have / mounted!" 4 55
 		main
